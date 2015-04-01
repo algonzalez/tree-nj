@@ -2,8 +2,18 @@ package com.nomscon.tools.tree;
 
 import java.io.File;
 import java.io.FileFilter;
+import java.io.IOException;
+import java.nio.file.FileVisitOption;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.attribute.BasicFileAttributes;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.EnumSet;
+import java.util.Stack;
 
 final class Tree {
     private final int OK = 0;
@@ -33,8 +43,172 @@ final class Tree {
             return OK;
         }
         
-        printTree();
-        return OK;    
+        //printTree();
+        
+        // TODO: try with walkFileTree
+        
+        EnumSet<FileVisitOption> options;
+        // if (config.followSymLinks
+        options = EnumSet.of(FileVisitOption.FOLLOW_LINKS);
+        // else
+        options = EnumSet.noneOf(FileVisitOption.class);
+
+        PrintTreeFileVisitor visitor = new PrintTreeFileVisitor();
+        String startDirPath = config.getStartDirPath();
+        File baseDir = new File(startDirPath);
+        
+        // TODO: fix tildes in path
+        
+        Path startDir = Paths.get("c:\\dev\\java");
+        
+        try {
+            Files.walkFileTree(startDir, options, Integer.MAX_VALUE, visitor);
+        } catch (Exception e) {
+            println(e.toString());
+        }
+        
+        if (!config.skipSummaryReport()) {
+            println();
+            printSummary();
+            int dCount = visitor.getTotalDirCount();
+            int fCount = visitor.getTotalFileCount();
+            println(" %s director%s%s", 
+                dCount, 
+                (dCount == 1) ? "y" : "ies",
+                config.includeOnlyDirs()
+                        ? ""
+                        : String.format(", %s file%s",
+                                fCount,
+                                (fCount == 1) ? "" : "s"));
+
+        }
+
+        return OK;
+    }
+    
+    static void print(Object value) { System.out.print(value.toString()); }
+    static void print(String value) { System.out.print(value); }
+    static void print(String format, Object... args) {
+        System.out.print(String.format(format, args));
+    }
+
+    static void println() { System.out.println(); }
+    static void println(Object value) { System.out.println(value.toString()); }
+    static void println(String value) { System.out.println(value); }
+    static void println(String format, Object... args) {
+        System.out.println(String.format(format, args));
+    }
+    
+    private class DirInfo {
+        private int curDirCount = 0;
+        private final int subDirCount;
+        
+        public DirInfo(int subDirCount) {
+            curDirCount = 1;    // TODO: or 0 and then increment in code ???
+            this.subDirCount = subDirCount;
+        }
+        
+        public void incrDirCount() { curDirCount++; }
+        
+        public boolean isLastDir() {
+            return curDirCount == subDirCount;
+        }
+    }
+    
+    private class PrintTreeFileVisitor extends SimpleFileVisitor<Path> {
+        private int curDepth = 0;
+        private int dirFileCount = 0;
+        
+        private int totalDirCount = 0;
+        private int totalFileCount = 0;
+        
+        private File[] files;
+
+        private Stack<DirInfo> subDirInfoStack = new Stack<>();
+        
+        private void printIndent(boolean isLast) {
+            int lastDepthIndex = curDepth - 1;
+            for (int i = 0; i < curDepth; i++) {
+                print((i != lastDepthIndex)
+                        ? "|   "
+                        : isLast
+                                ? "`-- "
+                                : "|-- ");
+            }
+        }
+        
+        public int getTotalDirCount() { return totalDirCount; }
+        public int getTotalFileCount() { return totalFileCount; }
+        
+        @Override
+        public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs)
+            throws IOException
+        {
+            if (curDepth > 0) {
+                printIndent(false);     // TODO: determine last dir
+                println(dir.getFileName() + File.separator);
+                totalDirCount++;
+            }
+            curDepth++;
+            files = dir.toFile().listFiles(new FileFilter() {
+                @Override
+                public boolean accept(File file) {
+                    return file.isFile();
+                }
+            });
+            dirFileCount = files.length;
+            // TODO: determine if sort is needed
+//            if (dirFileCount > 0)
+//                Arrays.sort(files);
+            return FileVisitResult.CONTINUE;
+        }
+        
+        @Override
+        public FileVisitResult visitFile(Path file, BasicFileAttributes attrs)
+            throws IOException
+        {
+            return FileVisitResult.CONTINUE;
+        }
+        
+        @Override
+        public FileVisitResult visitFileFailed(Path file, IOException exc)
+            throws IOException
+        {
+            File f = file.toFile();
+            boolean isDir = f.isDirectory();
+            if (isDir) {
+                totalDirCount++;
+            } else {
+                totalFileCount++;
+            }
+
+            printIndent(false);     // TODO: determine isLast
+            println("%s - Failed: %s", file.getFileName(), exc.getClass().getSimpleName());
+            
+            return isDir ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+        }
+
+        @Override
+        public FileVisitResult postVisitDirectory(Path dir, IOException exc)
+            throws IOException
+        {
+            printFiles();
+            curDepth--;
+            return FileVisitResult.CONTINUE;
+            // println("[%d|%d|%d]post: %s", curDepth, totalFileCount, totalDirCount, dir.toFile().getName());
+        }
+        
+        // TODO: can call if dirs of files first
+        private void printFiles() {
+            if (dirFileCount > 0) {
+                for (int i = 0; i < dirFileCount; i++) {
+                    File file = files[i];
+                    printIndent(dirFileCount == (i + 1));
+                    println(file.getName());
+                }
+                totalFileCount += dirFileCount;
+            }
+        }
     }
     
     private int getDirCount() {
